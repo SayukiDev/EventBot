@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-AGPL-blue.svg)](LICENSE)
 
-小規模の使用を想定したシンプルな日程管理用Descord Bot
+小規模の使用を想定したシンプルな日程管理用Discord Bot
 
 ## 使用
 ```bash
