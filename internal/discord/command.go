@@ -11,30 +11,20 @@ import (
 )
 
 func (d *Discord) AddCommand() error {
-	cmd, h := d.NewOnCategoryAdd()
-	_, err := d.s.ApplicationCommandCreate(d.s.State.User.ID, "", cmd)
-	if err != nil {
-		return fmt.Errorf("create OnCategoryAdd error: %w", err)
+	newer := []cmdNewer{
+		d.NewOnCategoryList,
+		d.NewOnCategoryAdd,
+		d.NewOnCategoryDel,
+		d.NewOnEventSet,
 	}
-	d.cmdHandles[cmd.Name] = h
-	cmd, h = d.NewOnCategoryDel()
-	_, err = d.s.ApplicationCommandCreate(d.s.State.User.ID, "", cmd)
-	if err != nil {
-		return fmt.Errorf("create OnCategoryDel error: %w", err)
+	for _, v := range newer {
+		cmd, h := v()
+		_, err := d.s.ApplicationCommandCreate(d.s.State.User.ID, "", cmd)
+		if err != nil {
+			return fmt.Errorf("create OnCategoryAdd error: %w", err)
+		}
+		d.cmdHandles[cmd.Name] = h
 	}
-	d.cmdHandles[cmd.Name] = h
-	cmd, h = d.NewOnCategoryList()
-	_, err = d.s.ApplicationCommandCreate(d.s.State.User.ID, "", cmd)
-	if err != nil {
-		return fmt.Errorf("create OnCategoryList error: %w", err)
-	}
-	d.cmdHandles[cmd.Name] = h
-	cmd, h = d.NewOnEventSet()
-	_, err = d.s.ApplicationCommandCreate(d.s.State.User.ID, "", cmd)
-	if err != nil {
-		return fmt.Errorf("create OnEventSet error: %w", err)
-	}
-	d.cmdHandles[cmd.Name] = h
 	d.s.AddHandler(func(s *dg.Session, i *dg.InteractionCreate) {
 		log.Info("InteractionCreate", zap.String("type", i.Type.String()), zap.String("name", i.ApplicationCommandData().Name))
 		if h, ok := d.cmdHandles[i.ApplicationCommandData().Name]; ok {
@@ -43,6 +33,8 @@ func (d *Discord) AddCommand() error {
 	})
 	return nil
 }
+
+type cmdNewer func() (*dg.ApplicationCommand, func(s *dg.Session, i *dg.InteractionCreate))
 
 func (d *Discord) NewOnCategoryAdd() (*dg.ApplicationCommand, func(s *dg.Session, i *dg.InteractionCreate)) {
 	cmd := &dg.ApplicationCommand{
