@@ -1,21 +1,26 @@
 package data
 
 import (
+	"EventBot/log"
 	"os"
 	"sync"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.uber.org/zap"
 )
 
 type Data struct {
 	lock    sync.RWMutex
 	path    string
 	content map[string]*Content // key: channel id
+	close   chan struct{}
+	once    sync.Once
 }
 
 type Content struct {
-	Category []Category        `bson:"category"`
-	Events   map[string]string `bson:"events"` // Key: id, Value: Title
+	Category     []Category `bson:"category"`
+	DefaultEvent string     `bson:"default_event"`
 }
 
 type Category struct {
@@ -27,6 +32,7 @@ func New(path string) *Data {
 	return &Data{
 		path:    path,
 		content: make(map[string]*Content),
+		close:   make(chan struct{}, 1),
 	}
 }
 
@@ -75,7 +81,6 @@ func (d *Data) Set(channelId string, f func(c *Content)) bool {
 	}
 
 	c := &Content{
-		Events:   make(map[string]string),
 		Category: make([]Category, 0),
 	}
 	d.content[channelId] = c
@@ -83,8 +88,36 @@ func (d *Data) Set(channelId string, f func(c *Content)) bool {
 	return false
 }
 
-func (d *Data) Sync() error {
+func (d *Data) Start() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	return d.save()
+	go func() {
+		for {
+			select {
+			case <-d.close:
+				close(d.close)
+				return
+			default:
+			}
+			d.lock.Lock()
+			defer d.lock.Unlock()
+			derr := d.save()
+			if derr != nil {
+				log.ErrorE("Failed to save data", zap.Error(derr))
+			}
+			time.Sleep(time.Second * 360)
+		}
+	}()
+	return nil
+}
+
+func (d *Data) Close() error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	var err error
+	d.once.Do(func() {
+		d.close <- struct{}{}
+		err = d.save()
+	})
+	return err
 }

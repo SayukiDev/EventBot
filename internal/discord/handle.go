@@ -4,6 +4,7 @@ import (
 	"EventBot/internal/data"
 	"EventBot/log"
 	"fmt"
+	"strings"
 
 	dg "github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
@@ -12,12 +13,21 @@ import (
 func (d *Discord) OnReactionUpdate(s *dg.Session, gID, cId, mId string) {
 	var fields []*dg.MessageEmbedField
 	var title string
-	var ok bool
+	m, err := s.ChannelMessage(cId, mId)
+	if err != nil {
+		log.Error("Get message failed", zap.Error(err))
+		return
+	}
+	if m.Author.ID != s.State.User.ID {
+		return
+	}
+	if len(m.Embeds) == 0 {
+		return
+	}
+	if strings.HasPrefix(m.Embeds[0].Title, ":calendar_spiral:") {
+		title = m.Embeds[0].Title
+	}
 	d.data.Get(gID, func(c *data.Content) {
-		title, ok = c.Events[cId+mId]
-		if !ok {
-			return
-		}
 		for _, v := range c.Category {
 			us, err := s.MessageReactions(cId, mId, v.Emoji, 100, "", "")
 			if err != nil {
@@ -38,15 +48,12 @@ func (d *Discord) OnReactionUpdate(s *dg.Session, gID, cId, mId string) {
 			})
 		}
 	})
-	if !ok {
-		return
-	}
 	e := &dg.MessageEmbed{
 		Title:  title,
 		Fields: fields,
 		Color:  0xFEDFE1,
 	}
-	_, err := s.ChannelMessageEditEmbed(cId, mId, e)
+	_, err = s.ChannelMessageEditEmbed(cId, mId, e)
 	if err != nil {
 		log.Error("Edit message failed", zap.Error(err))
 		return

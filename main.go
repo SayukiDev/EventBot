@@ -25,11 +25,6 @@ func main() {
 	if err != nil {
 		log.ErrorE("Failed to load config", zap.Error(err))
 	}
-	d := data.New(c.DataPath)
-	err = d.Load()
-	if err != nil {
-		log.ErrorE("Failed to load data", zap.Error(err))
-	}
 	log.SetLogLevel(c.LogLevel)
 	log.Info(
 		"Starting EventBot",
@@ -39,7 +34,16 @@ func main() {
 		zap.String("arch", runtime.GOARCH),
 		zap.String("log_level", c.LogLevel),
 	)
-	log.AddCloseFunc(d.Sync)
+	d := data.New(c.DataPath)
+	err = d.Load()
+	if err != nil {
+		log.ErrorE("Failed to load data", zap.Error(err))
+	}
+	err = d.Start()
+	if err != nil {
+		log.ErrorE("Failed to start data", zap.Error(err))
+	}
+	log.AddCloseFunc(d.Close)
 	dc, err := discord.NewDiscord(d, c.Token)
 	if err != nil {
 		log.ErrorE("Failed to start discord", zap.Error(err))

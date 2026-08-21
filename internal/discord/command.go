@@ -16,6 +16,7 @@ func (d *Discord) AddCommand() error {
 		d.NewOnCategoryAdd,
 		d.NewOnCategoryDel,
 		d.NewOnEventSet,
+		d.NewOnDefaultEventSet,
 	}
 	for _, v := range newer {
 		cmd, h := v()
@@ -250,7 +251,7 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 				Type:        dg.ApplicationCommandOptionString,
 				Name:        "title",
 				Description: "イベントのタイトル",
-				Required:    true,
+				Required:    false,
 			},
 		},
 	}
@@ -287,13 +288,35 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 			return
 		}
 		ad := i.ApplicationCommandData()
+		var title string
 		if len(ad.Options) == 0 {
-			log.Error("No option")
+			d.data.Get(i.GuildID, func(c *data.Content) {
+				title = c.DefaultEvent
+			})
+		} else {
+			title = ad.Options[0].StringValue()
+		}
+		if title == "" {
+			err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+				Type: dg.InteractionResponseChannelMessageWithSource,
+				Data: &dg.InteractionResponseData{
+					Embeds: []*dg.MessageEmbed{
+						{
+							Title:       "デフォルトイベント設定されてません",
+							Description: "デフォルトイベントを設定するかタイトルを指定してください",
+							Color:       0xFEDFE1,
+						},
+					},
+				},
+			})
+			if err != nil {
+				log.Error("Send message failed", zap.Error(err))
+				return
+			}
 			return
 		}
-		title := ad.Options[0].StringValue()
 		e := &dg.MessageEmbed{
-			Title:  title,
+			Title:  fmt.Sprintf(":calendar_spiral: %s\n------------", title),
 			Fields: fields,
 			Color:  0xFEDFE1,
 		}
@@ -315,7 +338,6 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 			return
 		}
 		d.data.Set(i.GuildID, func(c *data.Content) {
-			c.Events[i.ChannelID+m.ID] = title
 			for _, v := range c.Category {
 				err := s.MessageReactionAdd(i.ChannelID, m.ID, v.Emoji)
 				if err != nil {
@@ -324,5 +346,51 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 				}
 			}
 		})
+	}
+}
+
+func (d *Discord) NewOnDefaultEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i *dg.InteractionCreate)) {
+	cmd := &dg.ApplicationCommand{
+		Name:        "set-default-event",
+		Description: "イベントを設定します",
+		Options: []*dg.ApplicationCommandOption{
+			{
+				Type:        dg.ApplicationCommandOptionString,
+				Name:        "title",
+				Description: "イベントのタイトル",
+				Required:    true,
+			},
+		},
+	}
+	return cmd, func(s *dg.Session, i *dg.InteractionCreate) {
+		if len(i.ChannelID) == 0 {
+			return
+		}
+		ad := i.ApplicationCommandData()
+		if len(ad.Options) == 0 {
+			log.Error("No option")
+			return
+		}
+		title := ad.Options[0].StringValue()
+		e := &dg.MessageEmbed{
+			Title:       "設定しました",
+			Description: "デフォルトイベントを設定しました",
+			Color:       0xFEDFE1,
+		}
+		d.data.Set(i.GuildID, func(c *data.Content) {
+			c.DefaultEvent = title
+		})
+		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+			Type: dg.InteractionResponseChannelMessageWithSource,
+			Data: &dg.InteractionResponseData{
+				Embeds: []*dg.MessageEmbed{
+					e,
+				},
+			},
+		})
+		if err != nil {
+			log.Error("Send message failed", zap.Error(err))
+			return
+		}
 	}
 }
