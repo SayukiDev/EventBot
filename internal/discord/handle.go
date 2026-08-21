@@ -34,7 +34,7 @@ func (d *Discord) OnReactionUpdate(s *dg.Session, gID, cId, mId string) {
 			us, err := s.MessageReactions(cId, mId, v.Emoji, 100, "", "")
 			if err != nil {
 				log.Error("Get reactions failed", zap.Error(err))
-				return
+				continue
 			}
 			list := fmt.Sprintf("計 %d 人\n", len(us)-1)
 			for _, u := range us {
