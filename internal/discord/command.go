@@ -200,7 +200,7 @@ func (d *Discord) NewOnCategoryDel() (*dg.ApplicationCommand, func(s *dg.Session
 					continue
 				}
 				ok = true
-				c.Category = slices.Delete(c.Category, in, 1)
+				c.Category = slices.Delete(c.Category, in, in+1)
 				return
 			}
 		})
