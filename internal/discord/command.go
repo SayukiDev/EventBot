@@ -342,7 +342,7 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 				err := s.MessageReactionAdd(i.ChannelID, m.ID, v.Emoji)
 				if err != nil {
 					log.Error("Add reaction failed", zap.Error(err))
-					return
+					continue
 				}
 			}
 		})
