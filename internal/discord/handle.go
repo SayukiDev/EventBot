@@ -26,6 +26,8 @@ func (d *Discord) OnReactionUpdate(s *dg.Session, gID, cId, mId string) {
 	}
 	if strings.HasPrefix(m.Embeds[0].Title, ":calendar_spiral:") {
 		title = m.Embeds[0].Title
+	} else {
+		return
 	}
 	d.data.Get(gID, func(c *data.Content) {
 		for _, v := range c.Category {
