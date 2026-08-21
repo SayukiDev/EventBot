@@ -99,13 +99,15 @@ func (d *Data) Start() error {
 				return
 			default:
 			}
-			d.lock.Lock()
-			defer d.lock.Unlock()
-			derr := d.save()
-			if derr != nil {
-				log.ErrorE("Failed to save data", zap.Error(derr))
-			}
-			time.Sleep(time.Second * 360)
+			func() {
+				d.lock.Lock()
+				defer d.lock.Unlock()
+				derr := d.save()
+				if derr != nil {
+					log.ErrorE("Failed to save data", zap.Error(derr))
+				}
+				time.Sleep(time.Second * 360)
+			}()
 		}
 	}()
 	return nil
