@@ -106,8 +106,8 @@ func (d *Data) Start() error {
 				if derr != nil {
 					log.ErrorE("Failed to save data", zap.Error(derr))
 				}
-				time.Sleep(time.Second * 360)
 			}()
+			time.Sleep(time.Second * 360)
 		}
 	}()
 	return nil
