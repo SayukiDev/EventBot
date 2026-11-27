@@ -51,9 +51,10 @@ func (d *Discord) OnReactionUpdate(s *dg.Session, gID, cId, mId string) {
 		}
 	})
 	e := &dg.MessageEmbed{
-		Title:  title,
-		Fields: fields,
-		Color:  0xFEDFE1,
+		Title:       title,
+		Fields:      fields,
+		Description: m.Embeds[0].Description,
+		Color:       0xFEDFE1,
 	}
 	_, err = s.ChannelMessageEditEmbed(cId, mId, e)
 	if err != nil {

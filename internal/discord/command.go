@@ -253,6 +253,12 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 				Description: "イベントのタイトル",
 				Required:    false,
 			},
+			{
+				Type:        dg.ApplicationCommandOptionBoolean,
+				Name:        "at",
+				Description: "全員をAtする",
+				Required:    false,
+			},
 		},
 	}
 	return cmd, func(s *dg.Session, i *dg.InteractionCreate) {
@@ -319,6 +325,9 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 			Title:  fmt.Sprintf(":calendar_spiral: %s\n------------", title),
 			Fields: fields,
 			Color:  0xFEDFE1,
+		}
+		if len(ad.Options) > 1 && ad.Options[1].BoolValue() {
+			e.Description = "@everyone\n"
 		}
 		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 			Type: dg.InteractionResponseChannelMessageWithSource,
