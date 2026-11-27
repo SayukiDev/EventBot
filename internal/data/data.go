@@ -19,8 +19,10 @@ type Data struct {
 }
 
 type Content struct {
-	Category     []Category `bson:"category"`
-	DefaultEvent string     `bson:"default_event"`
+	Category          []Category `bson:"category"`
+	DefaultEvent      string     `bson:"default_event"`
+	ArchiveCategory   string     `bson:"archive_category"`
+	ChannelNameFormat string     `bson:"channel_name_format"`
 }
 
 type Category struct {

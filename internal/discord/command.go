@@ -5,6 +5,7 @@ import (
 	"EventBot/log"
 	"fmt"
 	"slices"
+	"strings"
 
 	dg "github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
@@ -17,6 +18,8 @@ func (d *Discord) AddCommand() error {
 		d.NewOnCategoryDel,
 		d.NewOnEventSet,
 		d.NewOnDefaultEventSet,
+		d.NewOnArchiveCategorySet,
+		d.NewOnChannelNameFormatSet,
 	}
 	for _, v := range newer {
 		cmd, h := v()
@@ -82,6 +85,7 @@ func (d *Discord) NewOnCategoryAdd() (*dg.ApplicationCommand, func(s *dg.Session
 			err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 				Type: dg.InteractionResponseChannelMessageWithSource,
 				Data: &dg.InteractionResponseData{
+					Flags: dg.MessageFlagsEphemeral,
 					Embeds: []*dg.MessageEmbed{
 						{
 							Title:       "失敗しました",
@@ -93,12 +97,13 @@ func (d *Discord) NewOnCategoryAdd() (*dg.ApplicationCommand, func(s *dg.Session
 			})
 			if err != nil {
 				log.Error("Send message failed", zap.Error(err))
-				return
 			}
+			return
 		}
 		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 			Type: dg.InteractionResponseChannelMessageWithSource,
 			Data: &dg.InteractionResponseData{
+				Flags: dg.MessageFlagsEphemeral,
 				Embeds: []*dg.MessageEmbed{
 					{
 						Title:       "追加しました。",
@@ -137,6 +142,7 @@ func (d *Discord) NewOnCategoryList() (*dg.ApplicationCommand, func(s *dg.Sessio
 			err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 				Type: dg.InteractionResponseChannelMessageWithSource,
 				Data: &dg.InteractionResponseData{
+					Flags: dg.MessageFlagsEphemeral,
 					Embeds: []*dg.MessageEmbed{
 						{
 							Title:       "取得に失敗しました",
@@ -154,6 +160,7 @@ func (d *Discord) NewOnCategoryList() (*dg.ApplicationCommand, func(s *dg.Sessio
 		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 			Type: dg.InteractionResponseChannelMessageWithSource,
 			Data: &dg.InteractionResponseData{
+				Flags: dg.MessageFlagsEphemeral,
 				Embeds: []*dg.MessageEmbed{
 					{
 						Title:  "取得しました",
@@ -208,6 +215,7 @@ func (d *Discord) NewOnCategoryDel() (*dg.ApplicationCommand, func(s *dg.Session
 			err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 				Type: dg.InteractionResponseChannelMessageWithSource,
 				Data: &dg.InteractionResponseData{
+					Flags: dg.MessageFlagsEphemeral,
 					Embeds: []*dg.MessageEmbed{
 						{
 							Title:       "削除しました。",
@@ -226,6 +234,7 @@ func (d *Discord) NewOnCategoryDel() (*dg.ApplicationCommand, func(s *dg.Session
 		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 			Type: dg.InteractionResponseChannelMessageWithSource,
 			Data: &dg.InteractionResponseData{
+				Flags: dg.MessageFlagsEphemeral,
 				Embeds: []*dg.MessageEmbed{
 					{
 						Title:       "失敗しました",
@@ -257,6 +266,12 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 				Type:        dg.ApplicationCommandOptionBoolean,
 				Name:        "at",
 				Description: "全員をAtする",
+				Required:    false,
+			},
+			{
+				Type:        dg.ApplicationCommandOptionBoolean,
+				Name:        "new-channel",
+				Description: "同じカテゴリーに新しいチャンネルを作成し、今のチャンネルをアーカイブに移動する（デフォルト: ON）",
 				Required:    false,
 			},
 		},
@@ -293,15 +308,28 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 			}
 			return
 		}
-		ad := i.ApplicationCommandData()
 		var title string
-		if len(ad.Options) == 0 {
-			d.data.Get(i.GuildID, func(c *data.Content) {
-				title = c.DefaultEvent
-			})
-		} else {
-			title = ad.Options[0].StringValue()
+		at := false
+		newChannel := true
+		for _, o := range i.ApplicationCommandData().Options {
+			switch o.Name {
+			case "title":
+				title = o.StringValue()
+			case "at":
+				at = o.BoolValue()
+			case "new-channel":
+				newChannel = o.BoolValue()
+			}
 		}
+		archive := ""
+		nameFormat := ""
+		d.data.Get(i.GuildID, func(c *data.Content) {
+			if title == "" {
+				title = c.DefaultEvent
+			}
+			archive = c.ArchiveCategory
+			nameFormat = c.ChannelNameFormat
+		})
 		if title == "" {
 			err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 				Type: dg.InteractionResponseChannelMessageWithSource,
@@ -326,12 +354,161 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 			Fields: fields,
 			Color:  0xFEDFE1,
 		}
-		if len(ad.Options) > 1 && ad.Options[1].BoolValue() {
+		if at {
 			e.Description = "@everyone\n"
+		}
+		var m *dg.Message
+		if newChannel {
+			m = d.setEventInNewChannel(s, i, e, archive, strings.ReplaceAll(nameFormat, "$title", title))
+			if m == nil {
+				return
+			}
+		} else {
+			err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+				Type: dg.InteractionResponseChannelMessageWithSource,
+				Data: &dg.InteractionResponseData{
+					Embeds: []*dg.MessageEmbed{
+						e,
+					},
+				},
+			})
+			if err != nil {
+				log.Error("Send message failed", zap.Error(err))
+				return
+			}
+			m, err = s.InteractionResponse(i.Interaction)
+			if err != nil {
+				log.Error("get interaction failed", zap.Error(err))
+				return
+			}
+		}
+		d.data.Get(i.GuildID, func(c *data.Content) {
+			for _, v := range c.Category {
+				err := s.MessageReactionAdd(m.ChannelID, m.ID, v.Emoji)
+				if err != nil {
+					log.Error("Add reaction failed", zap.Error(err))
+					continue
+				}
+			}
+		})
+	}
+}
+
+// setEventInNewChannel creates a copy of the current channel in the same category,
+// posts the event there and moves the current channel to the archive category (if set).
+// name is the name of the new channel; when empty the current channel name is reused.
+// It returns the event message, or nil when the event could not be posted.
+func (d *Discord) setEventInNewChannel(s *dg.Session, i *dg.InteractionCreate, e *dg.MessageEmbed, archive, name string) *dg.Message {
+	// Channel operations may take longer than the 3s interaction deadline.
+	err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+		Type: dg.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if err != nil {
+		log.Error("Send message failed", zap.Error(err))
+		return nil
+	}
+	result := func(title, desc string) {
+		_, err := s.InteractionResponseEdit(i.Interaction, &dg.WebhookEdit{
+			Embeds: &[]*dg.MessageEmbed{
+				{
+					Title:       title,
+					Description: desc,
+					Color:       0xFEDFE1,
+				},
+			},
+		})
+		if err != nil {
+			log.Error("Edit interaction response failed", zap.Error(err))
+		}
+	}
+	cur, err := s.Channel(i.ChannelID)
+	if err != nil {
+		log.Error("Get channel failed", zap.Error(err))
+		result("失敗しました", "チャンネル情報を取得できませんでした")
+		return nil
+	}
+	if cur.Type != dg.ChannelTypeGuildText {
+		result("失敗しました", "このチャンネルでは新しいチャンネルを作成できません。`new-channel: False` を指定してください")
+		return nil
+	}
+	if name == "" {
+		name = cur.Name
+	} else if r := []rune(name); len(r) > 100 {
+		// Discord limits channel names to 100 characters.
+		name = string(r[:100])
+	}
+	created, err := s.GuildChannelCreateComplex(i.GuildID, dg.GuildChannelCreateData{
+		Name:                 name,
+		Type:                 cur.Type,
+		Topic:                cur.Topic,
+		RateLimitPerUser:     cur.RateLimitPerUser,
+		Position:             cur.Position,
+		PermissionOverwrites: cur.PermissionOverwrites,
+		ParentID:             cur.ParentID,
+		NSFW:                 cur.NSFW,
+	})
+	if err != nil {
+		log.Error("Create channel failed", zap.Error(err))
+		result("失敗しました", "新しいチャンネルを作成できませんでした。Botの権限（チャンネルの管理）を確認してください")
+		return nil
+	}
+	m, err := s.ChannelMessageSendEmbed(created.ID, e)
+	if err != nil {
+		log.Error("Send message failed", zap.Error(err))
+		result("失敗しました", fmt.Sprintf("<#%s> を作成しましたが、イベントを送信できませんでした", created.ID))
+		return nil
+	}
+	desc := fmt.Sprintf("新しいチャンネル <#%s> にイベントを設定しました。", created.ID)
+	if archive != "" && archive != cur.ParentID {
+		_, err = s.ChannelEditComplex(cur.ID, &dg.ChannelEdit{ParentID: archive})
+		if err != nil {
+			log.Error("Move channel failed", zap.Error(err))
+			desc += "\nこのチャンネルをアーカイブカテゴリーに移動できませんでした。"
+		}
+	}
+	result("設定しました", desc)
+	return m
+}
+
+func (d *Discord) NewOnArchiveCategorySet() (*dg.ApplicationCommand, func(s *dg.Session, i *dg.InteractionCreate)) {
+	cmd := &dg.ApplicationCommand{
+		Name:        "set-archive-category",
+		Description: "set-event時に古いチャンネルを移動するカテゴリーを設定します（未指定で解除）",
+		Options: []*dg.ApplicationCommandOption{
+			{
+				Type:         dg.ApplicationCommandOptionChannel,
+				Name:         "category",
+				Description:  "移動先のカテゴリー",
+				ChannelTypes: []dg.ChannelType{dg.ChannelTypeGuildCategory},
+				Required:     false,
+			},
+		},
+	}
+	return cmd, func(s *dg.Session, i *dg.InteractionCreate) {
+		if len(i.ChannelID) == 0 {
+			return
+		}
+		id := ""
+		for _, o := range i.ApplicationCommandData().Options {
+			if o.Name == "category" {
+				id = o.ChannelValue(nil).ID
+			}
+		}
+		d.data.Set(i.GuildID, func(c *data.Content) {
+			c.ArchiveCategory = id
+		})
+		e := &dg.MessageEmbed{
+			Title:       "設定しました",
+			Description: fmt.Sprintf("アーカイブカテゴリーを <#%s> に設定しました", id),
+			Color:       0xFEDFE1,
+		}
+		if id == "" {
+			e.Description = "アーカイブカテゴリーを解除しました"
 		}
 		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 			Type: dg.InteractionResponseChannelMessageWithSource,
 			Data: &dg.InteractionResponseData{
+				Flags: dg.MessageFlagsEphemeral,
 				Embeds: []*dg.MessageEmbed{
 					e,
 				},
@@ -341,20 +518,6 @@ func (d *Discord) NewOnEventSet() (*dg.ApplicationCommand, func(s *dg.Session, i
 			log.Error("Send message failed", zap.Error(err))
 			return
 		}
-		m, err := s.InteractionResponse(i.Interaction)
-		if err != nil {
-			log.Error("get interaction failed", zap.Error(err))
-			return
-		}
-		d.data.Set(i.GuildID, func(c *data.Content) {
-			for _, v := range c.Category {
-				err := s.MessageReactionAdd(i.ChannelID, m.ID, v.Emoji)
-				if err != nil {
-					log.Error("Add reaction failed", zap.Error(err))
-					continue
-				}
-			}
-		})
 	}
 }
 
@@ -392,6 +555,58 @@ func (d *Discord) NewOnDefaultEventSet() (*dg.ApplicationCommand, func(s *dg.Ses
 		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 			Type: dg.InteractionResponseChannelMessageWithSource,
 			Data: &dg.InteractionResponseData{
+				Flags: dg.MessageFlagsEphemeral,
+				Embeds: []*dg.MessageEmbed{
+					e,
+				},
+			},
+		})
+		if err != nil {
+			log.Error("Send message failed", zap.Error(err))
+			return
+		}
+	}
+}
+
+func (d *Discord) NewOnChannelNameFormatSet() (*dg.ApplicationCommand, func(s *dg.Session, i *dg.InteractionCreate)) {
+	cmd := &dg.ApplicationCommand{
+		Name:        "set-channel-name-format",
+		Description: "set-eventで作成するチャンネル名のフォーマットを設定します（未指定で解除）",
+		Options: []*dg.ApplicationCommandOption{
+			{
+				Type:        dg.ApplicationCommandOptionString,
+				Name:        "format",
+				Description: "チャンネル名のフォーマット。$title はイベントのタイトルに置き換えられます",
+				MaxLength:   100,
+				Required:    false,
+			},
+		},
+	}
+	return cmd, func(s *dg.Session, i *dg.InteractionCreate) {
+		if len(i.ChannelID) == 0 {
+			return
+		}
+		format := ""
+		for _, o := range i.ApplicationCommandData().Options {
+			if o.Name == "format" {
+				format = strings.TrimSpace(o.StringValue())
+			}
+		}
+		d.data.Set(i.GuildID, func(c *data.Content) {
+			c.ChannelNameFormat = format
+		})
+		e := &dg.MessageEmbed{
+			Title:       "設定しました",
+			Description: fmt.Sprintf("チャンネル名のフォーマットを `%s` に設定しました", format),
+			Color:       0xFEDFE1,
+		}
+		if format == "" {
+			e.Description = "チャンネル名のフォーマットを解除しました。今のチャンネルと同じ名前で作成します"
+		}
+		err := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+			Type: dg.InteractionResponseChannelMessageWithSource,
+			Data: &dg.InteractionResponseData{
+				Flags: dg.MessageFlagsEphemeral,
 				Embeds: []*dg.MessageEmbed{
 					e,
 				},
